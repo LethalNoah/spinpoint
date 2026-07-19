@@ -1079,12 +1079,13 @@ async function renderDailyBoard(day, myName, myScore) {
     rows.innerHTML = `<tr><td colspan="3" style="color:var(--muted)">Couldn't reach the leaderboard — try again later.</td></tr>`;
     return;
   }
+  const levels = await fetchLevels(top.map(r => r.name));
   rows.innerHTML = "";
   top.forEach((s, i) => {
     const tr = document.createElement("tr");
     if (s.name === myName && s.score === myScore) tr.className = "me";
     const medal = ["🥇", "🥈", "🥉"][i] || `${i + 1}.`;
-    tr.innerHTML = `<td>${medal}</td><td>${String(s.name).replace(/</g, "&lt;")}</td>` +
+    tr.innerHTML = `<td>${medal}</td><td>${nameCellHTML(s.name, levels)}</td>` +
       `<td style="text-align:right;font-weight:700;color:var(--accent)">${(+s.score).toLocaleString()}</td>`;
     rows.appendChild(tr);
   });
@@ -1110,7 +1111,7 @@ const store = {
   },
 };
 
-function renderLeaderboard(highlightRank) {
+async function renderLeaderboard(highlightRank) {
   const rows = $("lb-rows");
   rows.innerHTML = "";
   const scores = store.getScores();
@@ -1118,11 +1119,13 @@ function renderLeaderboard(highlightRank) {
     rows.innerHTML = `<tr><td colspan="4" style="color:var(--muted)">No scores yet — be the first!</td></tr>`;
     return;
   }
+  const levels = await fetchLevels([...new Set(scores.map(s => s.name))]);
+  rows.innerHTML = "";
   scores.forEach((s, i) => {
     const tr = document.createElement("tr");
     if (i === highlightRank) tr.className = "me";
     const medal = ["🥇", "🥈", "🥉"][i] || `${i + 1}.`;
-    tr.innerHTML = `<td>${medal}</td><td>${s.name.replace(/</g, "&lt;")}</td>` +
+    tr.innerHTML = `<td>${medal}</td><td>${nameCellHTML(s.name, levels)}</td>` +
       `<td class="lb-date">${s.date}</td><td>${s.score.toLocaleString()}</td>`;
     rows.appendChild(tr);
   });
@@ -1416,7 +1419,15 @@ async function fetchFriendsToday(day, names) {
   } catch (e) { return null; }
 }
 
-function fillBoardRows(tbody, rows, emptyMsg) {
+// One name cell everywhere: badge + name + level, so rank is always on display
+function nameCellHTML(name, levels) {
+  const lvl = levels?.[name];
+  const badge = lvl ? `<span class="mini-badge">${badgeSVG(lvl, 22)}</span>` : "";
+  const tag = lvl ? ` <span class="chip-lvl">Lv ${lvl}</span>` : "";
+  return `${badge}${String(name).replace(/</g, "&lt;")}${tag}`;
+}
+
+function fillBoardRows(tbody, rows, emptyMsg, levels) {
   tbody.innerHTML = "";
   if (!rows || rows.length === 0) {
     tbody.innerHTML = `<tr><td colspan="3" style="color:var(--muted)">${emptyMsg}</td></tr>`;
@@ -1425,7 +1436,7 @@ function fillBoardRows(tbody, rows, emptyMsg) {
   rows.forEach((s, i) => {
     const tr = document.createElement("tr");
     const medal = ["🥇", "🥈", "🥉"][i] || `${i + 1}.`;
-    tr.innerHTML = `<td>${medal}</td><td>${String(s.name).replace(/</g, "&lt;")}</td>` +
+    tr.innerHTML = `<td>${medal}</td><td>${nameCellHTML(s.name, levels)}</td>` +
       `<td style="text-align:right;font-weight:700;color:var(--accent)">${(+s.score).toLocaleString()}</td>`;
     tbody.appendChild(tr);
   });
@@ -1459,7 +1470,6 @@ async function openBoards() {
   await migrateLocalFriends();
   const friends = await fetchFriends();
   renderFriendChips(friends);
-  fetchLevels(friends).then(levels => renderFriendChips(friends, levels));
   if (!backendReady()) {
     fillBoardRows($("boards-daily-rows"), null, "Global board not configured.");
     fillBoardRows($("friends-rows"), null, "Global board not configured.");
@@ -1472,11 +1482,21 @@ async function openBoards() {
     fetchDailyTop(day),
     fetchFriendsToday(day, friends),
   ]);
+  // one levels lookup covering every name on this screen
+  const names = [...new Set([
+    ...friends,
+    ...(top || []).map(r => r.name),
+    ...(friendRows || []).map(r => r.name),
+    ...store.getScores().map(s => s.name),
+  ])];
+  const levels = await fetchLevels(names);
+  renderFriendChips(friends, levels);
+  fillBoardRows($("boards-local-rows"), store.getScores(), "No games on this device yet.", levels);
   fillBoardRows($("boards-daily-rows"), top,
-    top === null ? "Couldn't reach the leaderboard." : "Nobody has played today's daily yet — go be first!");
+    top === null ? "Couldn't reach the leaderboard." : "Nobody has played today's daily yet — go be first!", levels);
   fillBoardRows($("friends-rows"), friendRows,
     friends.length === 0 ? "Add friends by their explorer name (or send an invite link) to see their daily scores."
-      : "None of your friends have played today's daily yet.");
+      : "None of your friends have played today's daily yet.", levels);
 }
 
 async function addFriend() {
