@@ -403,3 +403,40 @@ body {
 .lb-table td:last-child { font-weight: 700; color: var(--accent); text-align: right; }
 .lb-table tr.me td { background: rgba(255,210,61,.1); color: var(--accent); font-weight: 700; }
 .lb-table .lb-date { color: var(--muted); font-size: 0.8rem; }
+
+/* Boards & friends */
+#screen-boards { overflow-y: auto; }
+.end-actions { display: flex; gap: 0.8rem; justify-content: center; margin-bottom: 1.5rem; }
+.btn-small { font-size: 0.95rem; padding: 0.6rem 1.4rem; }
+.friend-add { display: flex; gap: 0.6rem; justify-content: center; margin-bottom: 0.8rem; }
+#friend-input {
+  background: var(--card);
+  border: 2px solid #33405f;
+  border-radius: 0.75rem;
+  color: var(--ink);
+  font-size: 0.95rem;
+  padding: 0.55rem 0.9rem;
+  width: 14rem;
+  outline: none;
+}
+#friend-input:focus { border-color: var(--accent); }
+.friend-list { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center; margin-bottom: 1.4rem; }
+.friend-chip {
+  background: var(--bg2);
+  border: 1px solid #33405f;
+  border-radius: 999px;
+  padding: 0.3rem 0.5rem 0.3rem 0.9rem;
+  font-size: 0.9rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.chip-x {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 0.1rem 0.3rem;
+}
+.chip-x:hover { color: var(--bad); }

@@ -2,11 +2,12 @@
 
 // ---------- Config ----------
 const TOTAL_ROUNDS = 10;
-const TIER_POINTS = { 1: 100, 2: 150, 3: 200 };  // staked by a correct answer, by difficulty
-const rescueMax = tier => TIER_POINTS[tier] / 2; // max map-only points after a wrong answer
-const MAX_MULT = 3;
-const FULL_MULT_KM = 300;     // within this distance you get the full x3
-const ZERO_BONUS_KM = 6000;   // at/after this distance multiplier bottoms out at x1
+// Trivia is the main event: a correct answer banks the full base points.
+// The map phase adds a geo bonus on top — substantial, but never required.
+const TIER_POINTS = { 1: 100, 2: 150, 3: 200 };  // banked by a correct answer, by difficulty
+const geoMax = tier => TIER_POINTS[tier] / 2;    // max geo bonus (+50% of base)
+const FULL_BONUS_KM = 300;    // within this distance the geo bonus is maxed
+const ZERO_BONUS_KM = 6000;   // at/after this distance the geo bonus is zero
 const MAP_SECONDS = 20;       // countdown for the map phase
 const STREAK_STEP = 0.1;      // each consecutive correct answer past the first adds +10%
 const STREAK_CAP = 1.5;
@@ -75,10 +76,10 @@ let activeChallenge = (() => {
 
 // ---------- Helpers ----------
 const $ = id => document.getElementById(id);
-const screens = ["screen-start", "screen-wheel", "screen-question", "screen-map", "screen-end"];
+const screens = ["screen-start", "screen-wheel", "screen-question", "screen-map", "screen-end", "screen-boards"];
 function show(id) {
   screens.forEach(s => $(s).classList.toggle("hidden", s !== id));
-  $("hud").classList.toggle("hidden", id === "screen-start");
+  $("hud").classList.toggle("hidden", id === "screen-start" || id === "screen-boards");
 }
 function shuffle(arr) {
   const a = arr.slice();
@@ -95,10 +96,11 @@ function haversineKm(lat1, lon1, lat2, lon2) {
     Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(a));
 }
-function multiplierFor(km) {
-  if (km <= FULL_MULT_KM) return MAX_MULT;
-  if (km >= ZERO_BONUS_KM) return 1;
-  return MAX_MULT - (MAX_MULT - 1) * (km - FULL_MULT_KM) / (ZERO_BONUS_KM - FULL_MULT_KM);
+// 1.0 for a pin within FULL_BONUS_KM, fading linearly to 0 at ZERO_BONUS_KM
+function proximity(km) {
+  if (km <= FULL_BONUS_KM) return 1;
+  if (km >= ZERO_BONUS_KM) return 0;
+  return 1 - (km - FULL_BONUS_KM) / (ZERO_BONUS_KM - FULL_BONUS_KM);
 }
 function streakMult() {
   return state.streak >= 2 ? Math.min(STREAK_CAP, 1 + STREAK_STEP * (state.streak - 1)) : 1;
@@ -596,10 +598,10 @@ function startMapPhase() {
   const stake = $("map-stake");
   const tier = state.question.d;
   if (state.answeredCorrect) {
-    stake.textContent = `✔ Correct! ${TIER_POINTS[tier]} pts staked — land close for up to ×${MAX_MULT}`;
+    stake.textContent = `✔ Correct! ${TIER_POINTS[tier]} pts banked — pin close for up to +${geoMax(tier)} bonus`;
     stake.className = "map-stake staked";
   } else {
-    stake.textContent = `✘ Wrong — rescue up to ${rescueMax(tier)} pts with a close pin`;
+    stake.textContent = `✘ Wrong — a close pin still earns up to +${geoMax(tier)}`;
     stake.className = "map-stake rescue";
   }
   $("btn-confirm").classList.add("hidden");
@@ -760,15 +762,11 @@ function confirmGuess() {
 
   const q = state.question;
   const km = haversineKm(state.guess.lat, state.guess.lon, q.lat, q.lon);
-  const mult = multiplierFor(km);
+  const p = proximity(km);
+  const geoBonus = Math.round(geoMax(q.d) * p);
+  const base = state.answeredCorrect ? TIER_POINTS[q.d] : 0;
   const sMult = state.answeredCorrect ? streakMult() : 1;
-  let points;
-  if (state.answeredCorrect) {
-    points = Math.round(TIER_POINTS[q.d] * mult * sMult);
-  } else {
-    // wrong answer: no stake to multiply, but a close pin rescues a few points
-    points = Math.round(rescueMax(q.d) * (mult - 1) / (MAX_MULT - 1));
-  }
+  const points = Math.round((base + geoBonus) * sMult);
   state.score += points;
   state.history.push({
     genre: state.genre, city: q.city, correct: state.answeredCorrect,
@@ -776,9 +774,7 @@ function confirmGuess() {
   });
 
   $("res-dist").textContent = `${Math.round(km).toLocaleString()} km`;
-  $("res-mult").textContent = state.answeredCorrect
-    ? `×${mult.toFixed(2)}`
-    : `rescue ${(mult - 1).toFixed(2)}/${MAX_MULT - 1}`;
+  $("res-mult").textContent = `+${geoBonus} / ${geoMax(q.d)}`;
   const streakRow = $("res-streak-row");
   if (sMult > 1) {
     streakRow.classList.remove("hidden");
@@ -794,12 +790,15 @@ function confirmGuess() {
   drawMap();
 
   const [ax, ay] = toScreen(q.lat, q.lon);
-  const bullseye = km <= FULL_MULT_KM && state.answeredCorrect;
-  if (bullseye) {
+  if (p === 1 && state.answeredCorrect) {
     showSplash("🎯 BULLSEYE!", "#ffd23d");
     burstConfetti(ax, ay, true);
     sfx.bullseye();
-  } else if (state.answeredCorrect && mult >= 2) {
+  } else if (p === 1) {
+    showSplash("🎯 PERFECT PIN!", "#7fe086");
+    burstConfetti(ax, ay, false);
+    sfx.reveal();
+  } else if (state.answeredCorrect && p >= 0.5) {
     showSplash("🔥 SO CLOSE!", "#7fe086");
     burstConfetti(ax, ay, false);
     sfx.reveal();
@@ -894,9 +893,11 @@ function endGame() {
     cr.classList.add("hidden");
   }
 
-  let maxBase = 0;
-  for (let r = 1; r <= TOTAL_ROUNDS; r++) maxBase += TIER_POINTS[difficultyForRound(r)];
-  const max = maxBase * MAX_MULT;
+  let max = 0;
+  for (let r = 1; r <= TOTAL_ROUNDS; r++) {
+    const t = difficultyForRound(r);
+    max += TIER_POINTS[t] + geoMax(t);
+  }
   const pct = state.score / max;
   $("end-verdict").textContent =
     pct > 0.8 ? "🌍 World-class! Carmen Sandiego is taking notes." :
@@ -1033,6 +1034,94 @@ function startGame(mode) {
   nextRound();
 }
 
+// ---------- Friends (local list of explorer names; matched against the global board) ----------
+function getFriends() {
+  try { return JSON.parse(localStorage.getItem("sp-friends")) || []; }
+  catch (e) { return []; }
+}
+function setFriends(f) { localStorage.setItem("sp-friends", JSON.stringify(f)); }
+
+async function fetchFriendsToday(day, names) {
+  if (!backendReady() || names.length === 0) return null;
+  try {
+    const list = "(" + names.map(n => `"${n.replace(/"/g, "")}"`).join(",") + ")";
+    const res = await fetch(
+      `${BACKEND.url}/rest/v1/scores?day=eq.${day}&name=in.${encodeURIComponent(list)}&select=name,score&order=score.desc`,
+      { headers: backendHeaders() });
+    return res.ok ? await res.json() : null;
+  } catch (e) { return null; }
+}
+
+function fillBoardRows(tbody, rows, emptyMsg) {
+  tbody.innerHTML = "";
+  if (!rows || rows.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="3" style="color:var(--muted)">${emptyMsg}</td></tr>`;
+    return;
+  }
+  rows.forEach((s, i) => {
+    const tr = document.createElement("tr");
+    const medal = ["🥇", "🥈", "🥉"][i] || `${i + 1}.`;
+    tr.innerHTML = `<td>${medal}</td><td>${String(s.name).replace(/</g, "&lt;")}</td>` +
+      `<td style="text-align:right;font-weight:700;color:var(--accent)">${(+s.score).toLocaleString()}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function renderFriendChips() {
+  const box = $("friend-list");
+  box.innerHTML = "";
+  getFriends().forEach(name => {
+    const chip = document.createElement("span");
+    chip.className = "friend-chip";
+    chip.innerHTML = `${name.replace(/</g, "&lt;")} <button class="chip-x" title="Remove">✕</button>`;
+    chip.querySelector(".chip-x").addEventListener("click", () => {
+      setFriends(getFriends().filter(n => n !== name));
+      openBoards(); // refresh
+    });
+    box.appendChild(chip);
+  });
+}
+
+async function openBoards() {
+  show("screen-boards");
+  const day = utcDay();
+  $("boards-daily-title").textContent = `🌍 Daily Top 10 · ${day}`;
+  renderFriendChips();
+  fillBoardRows($("boards-local-rows"), store.getScores(),
+    "No games on this device yet.");
+  const friends = getFriends();
+  if (!backendReady()) {
+    fillBoardRows($("boards-daily-rows"), null, "Global board not configured.");
+    fillBoardRows($("friends-rows"), null, "Global board not configured.");
+    return;
+  }
+  $("boards-daily-rows").innerHTML = `<tr><td style="color:var(--muted)">Loading…</td></tr>`;
+  $("friends-rows").innerHTML = friends.length
+    ? `<tr><td style="color:var(--muted)">Loading…</td></tr>` : "";
+  const [top, friendRows] = await Promise.all([
+    fetchDailyTop(day),
+    fetchFriendsToday(day, friends),
+  ]);
+  fillBoardRows($("boards-daily-rows"), top,
+    top === null ? "Couldn't reach the leaderboard." : "Nobody has played today's daily yet — go be first!");
+  fillBoardRows($("friends-rows"), friendRows,
+    friends.length === 0 ? "Add friends by their explorer name to see their daily scores."
+      : "None of your friends have played today's daily yet.");
+}
+
+function addFriend() {
+  const input = $("friend-input");
+  const name = input.value.trim().slice(0, 16);
+  if (!name) return;
+  const friends = getFriends();
+  if (!friends.includes(name)) {
+    friends.push(name);
+    setFriends(friends);
+  }
+  input.value = "";
+  openBoards();
+}
+
 // ---------- Challenge sharing ----------
 function challengeUrl() {
   const name = encodeURIComponent(store.getName() || "Explorer");
@@ -1072,6 +1161,11 @@ function updateDailyButton() {
 $("btn-start").addEventListener("click", () => startGame("free"));
 $("btn-again").addEventListener("click", () => startGame(state.mode));
 $("btn-daily").addEventListener("click", () => startGame("daily"));
+$("btn-boards").addEventListener("click", openBoards);
+$("btn-boards-back").addEventListener("click", () => { updateDailyButton(); show("screen-start"); });
+$("btn-home").addEventListener("click", () => { updateDailyButton(); show("screen-start"); });
+$("btn-add-friend").addEventListener("click", addFriend);
+$("friend-input").addEventListener("keydown", e => { if (e.key === "Enter") addFriend(); });
 updateDailyButton();
 $("btn-spin").addEventListener("click", spinWheel);
 $("btn-confirm").addEventListener("click", confirmGuess);
