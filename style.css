@@ -572,3 +572,17 @@ body {
 .mini-badge svg { vertical-align: -0.35rem; margin-right: 0.15rem; }
 .chip-lvl { color: var(--muted); font-size: 0.75rem; }
 .profile-badge { display: flex; align-items: center; gap: 0.4rem; font-weight: 800; font-size: 0.95rem; }
+.boards-me {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.8rem;
+  background: var(--card);
+  border-radius: 1rem;
+  padding: 0.7rem 1.3rem;
+  margin: 0.4rem auto 1.1rem;
+  width: fit-content;
+}
+.boards-me-info { text-align: left; }
+.boards-me-info b { display: block; font-size: 1.1rem; }
+.boards-me-info span { color: var(--muted); font-size: 0.85rem; }

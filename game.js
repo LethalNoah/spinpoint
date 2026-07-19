@@ -1464,6 +1464,19 @@ function renderFriendChips(friends, levels = {}) {
 async function openBoards() {
   show("screen-boards");
   const day = utcDay();
+  // your own standing, front and center
+  const meBox = $("boards-me");
+  const myName = store.getName();
+  if (myName) {
+    const info = levelInfo(getXP());
+    const t = badgeTier(info.level);
+    meBox.classList.remove("hidden");
+    meBox.innerHTML = badgeSVG(info.level, 52) +
+      `<div class="boards-me-info"><b>${myName.replace(/</g, "&lt;")}</b>` +
+      `<span>Level ${info.level} · ${t.name} · ${info.into}/${info.need} XP</span></div>`;
+  } else {
+    meBox.classList.add("hidden");
+  }
   $("boards-daily-title").textContent = `🌍 Daily Top 10 · ${day}`;
   fillBoardRows($("boards-local-rows"), store.getScores(),
     "No games on this device yet.");
