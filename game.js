@@ -620,14 +620,49 @@ function startMapPhase() {
   startMapTimer();
 }
 
-// Map interactions: click = pin, drag = pan, wheel = zoom
+// Map interactions: tap/click = pin, drag = pan, wheel or pinch = zoom
+const MAP_MAX_ZOOM = 20;
+const mapTouches = new Map();   // active pointers, for pinch
+let pinchDist = 0;
+
+function applyMapZoom(factor, mx, my) {
+  const newZoom = Math.min(MAP_MAX_ZOOM, Math.max(1, view.zoom * factor));
+  const f = newZoom / view.zoom;
+  view.ox = mx - (mx - view.ox) * f;
+  view.oy = my - (my - view.oy) * f;
+  view.zoom = newZoom;
+  clampView();
+  drawMap();
+}
+
 mapCanvas.addEventListener("pointerdown", e => {
-  dragging = true;
-  dragMoved = false;
-  dragStart = { x: e.clientX, y: e.clientY, ox: view.ox, oy: view.oy };
-  mapCanvas.setPointerCapture(e.pointerId);
+  mapTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  try { mapCanvas.setPointerCapture(e.pointerId); } catch (err) { /* synthetic/stale pointer */ }
+  if (mapTouches.size === 2) {
+    // second finger: this gesture is a pinch, never a pin drop
+    dragging = false;
+    dragMoved = true;
+    const [a, b] = [...mapTouches.values()];
+    pinchDist = Math.hypot(a.x - b.x, a.y - b.y);
+  } else if (mapTouches.size === 1) {
+    dragging = true;
+    dragMoved = false;
+    dragStart = { x: e.clientX, y: e.clientY, ox: view.ox, oy: view.oy };
+  }
 });
 mapCanvas.addEventListener("pointermove", e => {
+  if (!mapTouches.has(e.pointerId)) return;
+  mapTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (mapTouches.size === 2) {
+    const [a, b] = [...mapTouches.values()];
+    const d = Math.hypot(a.x - b.x, a.y - b.y);
+    if (pinchDist > 0 && d > 0) {
+      const rect = mapCanvas.getBoundingClientRect();
+      applyMapZoom(d / pinchDist, (a.x + b.x) / 2 - rect.left, (a.y + b.y) / 2 - rect.top);
+    }
+    pinchDist = d;
+    return;
+  }
   if (!dragging) return;
   const dx = e.clientX - dragStart.x, dy = e.clientY - dragStart.y;
   if (Math.abs(dx) + Math.abs(dy) > 5) dragMoved = true;
@@ -639,12 +674,16 @@ mapCanvas.addEventListener("pointermove", e => {
     drawMap();
   }
 });
-mapCanvas.addEventListener("pointerup", e => {
-  if (!dragging) return;
+function mapPointerEnd(e) {
+  mapTouches.delete(e.pointerId);
+  pinchDist = 0;
+  if (!dragging && mapTouches.size > 0) return;
+  const wasDragging = dragging;
   dragging = false;
   mapCanvas.classList.remove("grabbing");
-  if (dragMoved || revealed || state.locked) return;
-  // a clean click: drop the pin
+  if (e.type === "pointercancel") return;
+  if (!wasDragging || dragMoved || revealed || state.locked) return;
+  // a clean tap/click: drop the pin
   const rect = mapCanvas.getBoundingClientRect();
   const w = toWorld(e.clientX - rect.left, e.clientY - rect.top);
   if (w.lat > LAT_TOP || w.lat < LAT_BOTTOM || w.lon < -180 || w.lon > 180) return;
@@ -654,19 +693,13 @@ mapCanvas.addEventListener("pointerup", e => {
   $("map-hint").classList.add("hidden");
   drawMap();
   startPinFx();
-});
+}
+mapCanvas.addEventListener("pointerup", mapPointerEnd);
+mapCanvas.addEventListener("pointercancel", mapPointerEnd);
 mapCanvas.addEventListener("wheel", e => {
   e.preventDefault();
   const rect = mapCanvas.getBoundingClientRect();
-  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
-  const factor = e.deltaY < 0 ? 1.25 : 0.8;
-  const newZoom = Math.min(14, Math.max(1, view.zoom * factor));
-  const f = newZoom / view.zoom;
-  view.ox = mx - (mx - view.ox) * f;
-  view.oy = my - (my - view.oy) * f;
-  view.zoom = newZoom;
-  clampView();
-  drawMap();
+  applyMapZoom(e.deltaY < 0 ? 1.25 : 0.8, e.clientX - rect.left, e.clientY - rect.top);
 }, { passive: false });
 window.addEventListener("resize", () => {
   if ($("screen-map").classList.contains("hidden")) return;
@@ -921,7 +954,9 @@ async function endGame() {
     date: new Date().toISOString().slice(0, 10),
   };
   const rank = store.saveScore(entry);
-  const isNewBest = state.score > 0 && state.score > prevBest;
+  // daily replays don't count anywhere global, so don't crown them either
+  const replayRun = state.mode === "daily" && !state.firstDaily;
+  const isNewBest = state.score > 0 && state.score > prevBest && !replayRun;
   $("new-best").classList.toggle("hidden", !isNewBest);
   if (isNewBest) sfx.bullseye();
   renderLeaderboard(rank);
@@ -1533,30 +1568,60 @@ function drawJourney() {
   }
 }
 
-jCanvas.addEventListener("pointerdown", e => {
-  jDrag = { x: e.clientX, y: e.clientY, ox: jview.ox, oy: jview.oy };
-  jCanvas.setPointerCapture(e.pointerId);
-});
-jCanvas.addEventListener("pointermove", e => {
-  if (!jDrag) return;
-  jview.ox = jDrag.ox + e.clientX - jDrag.x;
-  jview.oy = jDrag.oy + e.clientY - jDrag.y;
-  clampJourney();
-  drawJourney();
-});
-jCanvas.addEventListener("pointerup", () => { jDrag = null; });
-jCanvas.addEventListener("wheel", e => {
-  e.preventDefault();
-  const rect = jCanvas.getBoundingClientRect();
-  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
-  const factor = e.deltaY < 0 ? 1.25 : 0.8;
-  const newZoom = Math.min(14, Math.max(1, jview.zoom * factor));
+const jTouches = new Map();
+let jPinchDist = 0;
+
+function applyJourneyZoom(factor, mx, my) {
+  const newZoom = Math.min(MAP_MAX_ZOOM, Math.max(1, jview.zoom * factor));
   const f = newZoom / jview.zoom;
   jview.ox = mx - (mx - jview.ox) * f;
   jview.oy = my - (my - jview.oy) * f;
   jview.zoom = newZoom;
   clampJourney();
   drawJourney();
+}
+
+jCanvas.addEventListener("pointerdown", e => {
+  jTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  try { jCanvas.setPointerCapture(e.pointerId); } catch (err) { /* synthetic/stale pointer */ }
+  if (jTouches.size === 2) {
+    jDrag = null;
+    const [a, b] = [...jTouches.values()];
+    jPinchDist = Math.hypot(a.x - b.x, a.y - b.y);
+  } else if (jTouches.size === 1) {
+    jDrag = { x: e.clientX, y: e.clientY, ox: jview.ox, oy: jview.oy };
+  }
+});
+jCanvas.addEventListener("pointermove", e => {
+  if (!jTouches.has(e.pointerId)) return;
+  jTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (jTouches.size === 2) {
+    const [a, b] = [...jTouches.values()];
+    const d = Math.hypot(a.x - b.x, a.y - b.y);
+    if (jPinchDist > 0 && d > 0) {
+      const rect = jCanvas.getBoundingClientRect();
+      applyJourneyZoom(d / jPinchDist, (a.x + b.x) / 2 - rect.left, (a.y + b.y) / 2 - rect.top);
+    }
+    jPinchDist = d;
+    return;
+  }
+  if (!jDrag) return;
+  jview.ox = jDrag.ox + e.clientX - jDrag.x;
+  jview.oy = jDrag.oy + e.clientY - jDrag.y;
+  clampJourney();
+  drawJourney();
+});
+function jPointerEnd(e) {
+  jTouches.delete(e.pointerId);
+  jPinchDist = 0;
+  jDrag = null;
+}
+jCanvas.addEventListener("pointerup", jPointerEnd);
+jCanvas.addEventListener("pointercancel", jPointerEnd);
+jCanvas.addEventListener("wheel", e => {
+  e.preventDefault();
+  const rect = jCanvas.getBoundingClientRect();
+  applyJourneyZoom(e.deltaY < 0 ? 1.25 : 0.8, e.clientX - rect.left, e.clientY - rect.top);
 }, { passive: false });
 
 function computeStats(pins) {

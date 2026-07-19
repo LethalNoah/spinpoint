@@ -84,8 +84,11 @@ body {
 .btn-big:hover { transform: translateY(-2px); }
 .btn-big:active { transform: translateY(3px); box-shadow: 0 2px 0 #b8931f; }
 
-/* Start */
-.start-card { max-width: 36rem; text-align: center; }
+/* Start
+   Scrollable + margin:auto instead of flex-centering, so small screens
+   (phones) can reach the top and bottom of tall content */
+#screen-start { overflow-y: auto; justify-content: flex-start; }
+.start-card { max-width: 36rem; text-align: center; margin: auto; padding: 0.5rem 0; }
 .logo { font-size: 4rem; font-weight: 900; letter-spacing: -1px; }
 .logo span { color: var(--accent); }
 .tagline { color: var(--muted); font-size: 1.15rem; margin-bottom: 1.6rem; }
@@ -261,7 +264,7 @@ body {
 }
 @keyframes pulse { from { opacity: .35; } to { opacity: 1; } }
 .fx-layer { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
-#map { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; background: #04070d; }
+#map { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; background: #04070d; touch-action: none; }
 #map.grabbing { cursor: grabbing; }
 .map-hint {
   position: absolute;
@@ -351,8 +354,9 @@ body {
 }
 
 /* End */
-#screen-end { overflow-y: auto; }
-.end-card { text-align: center; max-width: 42rem; width: 100%; }
+#screen-end { overflow-y: auto; justify-content: flex-start; }
+#screen-boards { justify-content: flex-start; }
+.end-card { text-align: center; max-width: 42rem; width: 100%; margin: auto; padding: 0.5rem 0; }
 .end-card h2 { font-size: 1.4rem; color: var(--muted); text-transform: uppercase; letter-spacing: 2px; }
 .end-score { font-size: 4.6rem; font-weight: 900; color: var(--accent); line-height: 1.1; }
 .end-verdict { font-size: 1.15rem; margin-bottom: 1.4rem; }
@@ -491,7 +495,7 @@ body {
 .view-tab.active { background: var(--accent); color: #232a17; }
 .journey-wrap { position: relative; flex: 1 1 auto; min-height: 0; width: 100%; }
 .profile-foot { flex: 0 0 auto; padding: 0.8rem; }
-#journey { position: absolute; inset: 0; width: 100%; height: 100%; background: #04070d; cursor: grab; }
+#journey { position: absolute; inset: 0; width: 100%; height: 100%; background: #04070d; cursor: grab; touch-action: none; }
 #journey:active { cursor: grabbing; }
 .journey-legend {
   position: absolute;
