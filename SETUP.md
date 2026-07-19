@@ -81,6 +81,20 @@ create policy "public insert pins" on public.pins for insert with check (true);
 create index pins_name_time on public.pins (name, created_at desc);
 ```
 
+For XP/levels (badges visible to friends), also run:
+
+```sql
+create table public.players (
+  name text primary key check (char_length(name) between 1 and 16),
+  xp int not null default 0 check (xp between 0 and 100000000),
+  updated_at timestamptz not null default now()
+);
+alter table public.players enable row level security;
+create policy "public read players" on public.players for select using (true);
+create policy "public insert players" on public.players for insert with check (true);
+create policy "public update players" on public.players for update using (true) with check (true);
+```
+
 (Friendship rows are stored with `a` < `b` alphabetically; the unique constraint
 prevents duplicates. Deletes are public so anyone can unfriend — acceptable for a
 small friendly deployment, worth revisiting if the game grows.)

@@ -30,6 +30,7 @@
     </ol>
     <p class="how-note">No borders. No labels. Just you and the shape of the world. 10 rounds.</p>
     <div class="name-row">
+      <div id="home-badge" class="home-badge"></div>
       <input id="name-input" maxlength="16" placeholder="Your explorer name" autocomplete="off" spellcheck="false">
     </div>
     <div class="start-buttons">
@@ -111,6 +112,7 @@
 <section id="screen-profile" class="screen hidden">
   <div class="profile-head">
     <h2>🗺️ Map &amp; Stats</h2>
+    <div id="profile-badge" class="profile-badge"></div>
     <div id="profile-chips" class="profile-chips"></div>
   </div>
   <div class="journey-wrap">
@@ -132,6 +134,15 @@
   <div class="end-card">
     <h2>Final Score</h2>
     <div id="end-score" class="end-score">0</div>
+    <div id="level-up" class="new-best hidden"></div>
+    <div class="xp-panel">
+      <div id="xp-badge" class="xp-badge"></div>
+      <div class="xp-info">
+        <div id="xp-gained" class="xp-gained"></div>
+        <div class="xp-track"><div id="xp-bar"></div></div>
+        <div id="xp-label" class="xp-label"></div>
+      </div>
+    </div>
     <div id="new-best" class="new-best hidden">👑 NEW HIGH SCORE!</div>
     <div id="challenge-result" class="challenge-result hidden"></div>
     <div id="end-verdict" class="end-verdict"></div>

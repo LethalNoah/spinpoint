@@ -511,3 +511,46 @@ body {
 .stat-verdict b { color: var(--ink); }
 .stats-empty { color: var(--muted); padding: 1.5rem 0; }
 .banner-hint { margin-top: 0.6rem; font-size: 0.9rem; color: var(--accent); }
+
+/* XP & badges */
+.home-badge { display: flex; align-items: center; gap: 0.6rem; justify-content: center; margin-bottom: 0.7rem; }
+.home-badge svg { display: block; }
+.home-badge-label { text-align: left; font-size: 0.9rem; font-weight: 700; line-height: 1.35; }
+.home-badge-xp { color: var(--muted); font-weight: 400; font-size: 0.8rem; }
+.name-row { display: flex; flex-direction: column; align-items: center; }
+
+.xp-panel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  background: var(--card);
+  border-radius: 1rem;
+  padding: 0.9rem 1.4rem;
+  margin: 0.9rem auto 1rem;
+  max-width: 26rem;
+}
+.xp-badge { flex: 0 0 auto; }
+.xp-badge.badge-pop { animation: badge-pop .7s cubic-bezier(.2,1.8,.4,1); }
+@keyframes badge-pop {
+  0% { transform: scale(.4) rotate(-15deg); }
+  60% { transform: scale(1.25) rotate(5deg); }
+  100% { transform: scale(1) rotate(0); }
+}
+.xp-info { flex: 1 1 auto; text-align: left; }
+.xp-gained { font-size: 1.2rem; font-weight: 800; color: var(--accent); margin-bottom: 0.35rem; }
+.xp-double {
+  font-size: 0.75rem;
+  background: rgba(67,182,73,.2);
+  color: #7fe086;
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+  vertical-align: middle;
+}
+.xp-track { height: 0.6rem; background: rgba(0,0,0,.4); border-radius: 0.3rem; overflow: hidden; }
+#xp-bar { height: 100%; width: 0; background: linear-gradient(90deg, #ffd23d, #ff9d3d); border-radius: 0.3rem; }
+.xp-label { font-size: 0.8rem; color: var(--muted); margin-top: 0.35rem; }
+
+.mini-badge svg { vertical-align: -0.35rem; margin-right: 0.15rem; }
+.chip-lvl { color: var(--muted); font-size: 0.75rem; }
+.profile-badge { display: flex; align-items: center; gap: 0.4rem; font-weight: 800; font-size: 0.95rem; }

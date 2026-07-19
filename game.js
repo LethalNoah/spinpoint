@@ -848,8 +848,57 @@ function nextRound() {
   drawWheel();
 }
 
+// End-screen XP panel: bar fills from where you were to where you are now,
+// with a level-up celebration when a boundary is crossed
+function renderXpPanel(oldInfo, newInfo, gained, doubled) {
+  $("xp-badge").innerHTML = badgeSVG(newInfo.level, 58);
+  $("xp-gained").innerHTML = `+${gained} XP` + (doubled ? ` <span class="xp-double">🌍 DAILY ×2</span>` : "");
+  $("xp-label").textContent = `Level ${newInfo.level} · ${newInfo.into}/${newInfo.need} XP`;
+  const bar = $("xp-bar");
+  const leveled = newInfo.level > oldInfo.level;
+  const lu = $("level-up");
+  lu.classList.add("hidden");
+  bar.style.transition = "none";
+  bar.style.width = (oldInfo.into / oldInfo.need * 100) + "%";
+  void bar.offsetWidth;
+  bar.style.transition = "width .9s ease-out";
+  if (leveled) {
+    bar.style.width = "100%";
+    setTimeout(() => {
+      bar.style.transition = "none";
+      bar.style.width = "0%";
+      void bar.offsetWidth;
+      bar.style.transition = "width .7s ease-out";
+      bar.style.width = (newInfo.into / newInfo.need * 100) + "%";
+      const t = badgeTier(newInfo.level);
+      const newTier = badgeTier(newInfo.level).min > badgeTier(oldInfo.level).min;
+      lu.textContent = newTier
+        ? `⬆️ LEVEL ${newInfo.level} — ${t.name.toUpperCase()} BADGE UNLOCKED!`
+        : `⬆️ LEVEL ${newInfo.level}!`;
+      lu.classList.remove("hidden");
+      $("xp-badge").classList.remove("badge-pop");
+      void $("xp-badge").offsetWidth;
+      $("xp-badge").classList.add("badge-pop");
+      sfx.bullseye();
+    }, 1000);
+  } else {
+    setTimeout(() => { bar.style.width = (newInfo.into / newInfo.need * 100) + "%"; }, 60);
+  }
+}
+
 function endGame() {
   $("end-score").textContent = state.score.toLocaleString();
+
+  // XP: flat completion award + score bonus; first daily of the day pays double.
+  // (Computed before the daily block below marks today as played.)
+  const firstDaily = state.mode === "daily" && localStorage.getItem("sp-daily-" + utcDay()) === null;
+  const doubled = state.mode === "daily" && firstDaily;
+  const gainedXP = (GAME_XP + Math.round(state.score / 10)) * (doubled ? 2 : 1);
+  const oldInfo = levelInfo(getXP());
+  setXP(getXP() + gainedXP);
+  const newInfo = levelInfo(getXP());
+  pushXP();
+  renderXpPanel(oldInfo, newInfo, gainedXP, doubled);
 
   // record the run and show where it landed
   const prevBest = store.getScores()[0]?.score ?? 0;
@@ -1043,6 +1092,80 @@ function startGame(mode) {
   nextRound();
 }
 
+// ---------- XP & levels ----------
+// Flat XP for finishing plus a score bonus; the daily's first run pays double.
+const GAME_XP = 50;
+const xpNeedFor = lvl => 250 + (lvl - 1) * 75;   // XP to go from lvl -> lvl+1
+function levelInfo(totalXp) {
+  let level = 1, into = totalXp;
+  while (into >= xpNeedFor(level)) { into -= xpNeedFor(level); level++; }
+  return { level, into, need: xpNeedFor(level) };
+}
+const getXP = () => parseInt(localStorage.getItem("sp-xp"), 10) || 0;
+const setXP = v => localStorage.setItem("sp-xp", v);
+
+async function pushXP() {
+  const name = store.getName();
+  if (!backendReady() || !name) return;
+  try {
+    await fetch(`${BACKEND.url}/rest/v1/players?on_conflict=name`, {
+      method: "POST",
+      headers: { ...backendHeaders(), Prefer: "return=minimal,resolution=merge-duplicates" },
+      body: JSON.stringify({ name, xp: getXP(), updated_at: new Date().toISOString() }),
+    });
+  } catch (e) { /* offline is fine */ }
+}
+
+async function fetchLevels(names) {
+  if (!backendReady() || names.length === 0) return {};
+  try {
+    const list = "(" + names.map(n => quoted(n)).join(",") + ")";
+    const res = await fetch(
+      `${BACKEND.url}/rest/v1/players?name=in.${encodeURIComponent(list)}&select=name,xp`,
+      { headers: backendHeaders() });
+    if (!res.ok) return {};
+    const out = {};
+    for (const r of await res.json()) out[r.name] = levelInfo(r.xp).level;
+    return out;
+  } catch (e) { return {}; }
+}
+
+// Badge: an SVG medallion that levels up with you. Star pips fill in each level;
+// every 5 levels the material itself changes.
+const BADGE_TIERS = [
+  { min: 30, name: "Diamond",  c1: "#7e8fd4", c2: "#e8fbff", ring: "#c8f4ff", glow: "rgba(174,242,255,.5)" },
+  { min: 25, name: "Ruby",     c1: "#8f1430", c2: "#ff5a72", ring: "#e5324b", glow: "rgba(229,50,75,.45)" },
+  { min: 20, name: "Sapphire", c1: "#1a3e8f", c2: "#7fb0ff", ring: "#4f8ef7", glow: "rgba(79,142,247,.45)" },
+  { min: 15, name: "Emerald",  c1: "#0e6b3a", c2: "#69f0a8", ring: "#3ddc84", glow: "rgba(61,220,132,.45)" },
+  { min: 10, name: "Gold",     c1: "#9a7000", c2: "#ffe066", ring: "#ffd700", glow: "rgba(255,215,0,.4)" },
+  { min: 5,  name: "Silver",   c1: "#6f7d8e", c2: "#e6edf5", ring: "#c3ceda", glow: null },
+  { min: 1,  name: "Bronze",   c1: "#7a4419", c2: "#d99a5b", ring: "#b06f33", glow: null },
+];
+const badgeTier = level => BADGE_TIERS.find(t => level >= t.min) || BADGE_TIERS[BADGE_TIERS.length - 1];
+
+function badgeSVG(level, px = 48) {
+  const t = badgeTier(level);
+  const pips = Math.min(4, Math.max(0, (level - t.min) % 5));
+  const uid = "bd" + Math.random().toString(36).slice(2, 8);
+  const stars = Array.from({ length: 4 }, (_, i) =>
+    `<circle cx="${32 + i * 12}" cy="89" r="3.2" fill="${i < pips ? "#fff" : "rgba(0,0,0,.4)"}"/>`).join("");
+  const glow = t.glow ? `<ellipse cx="50" cy="55" rx="49" ry="53" fill="${t.glow}"/>` : "";
+  return `<svg viewBox="0 0 100 110" width="${px}" height="${Math.round(px * 1.1)}" xmlns="http://www.w3.org/2000/svg" aria-label="Level ${level} ${t.name} badge">
+${glow}<defs><linearGradient id="${uid}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${t.c2}"/><stop offset="1" stop-color="${t.c1}"/></linearGradient></defs>
+<polygon points="50,4 93,29 93,81 50,106 7,81 7,29" fill="url(#${uid})" stroke="${t.ring}" stroke-width="4" stroke-linejoin="round"/>
+<polygon points="50,14 84,34 84,76 50,96 16,76 16,34" fill="rgba(0,0,0,.3)"/>
+<text x="50" y="${level >= 100 ? 60 : 63}" text-anchor="middle" font-size="${level >= 100 ? 24 : 32}" font-weight="900" fill="#fff" font-family="Segoe UI, sans-serif">${level}</text>
+${stars}</svg>`;
+}
+
+function updateHomeBadge() {
+  const info = levelInfo(getXP());
+  const t = badgeTier(info.level);
+  $("home-badge").innerHTML = badgeSVG(info.level, 44) +
+    `<span class="home-badge-label">Level ${info.level} · ${t.name}<br>` +
+    `<span class="home-badge-xp">${info.into}/${info.need} XP</span></span>`;
+}
+
 // ---------- Pins: every guessed round, kept locally and (when possible) globally ----------
 function getLocalPins() {
   try { return JSON.parse(localStorage.getItem("sp-pins")) || []; }
@@ -1221,13 +1344,17 @@ function fillBoardRows(tbody, rows, emptyMsg) {
   });
 }
 
-function renderFriendChips(friends) {
+function renderFriendChips(friends, levels = {}) {
   const box = $("friend-list");
   box.innerHTML = "";
   friends.forEach(name => {
     const chip = document.createElement("span");
     chip.className = "friend-chip";
-    chip.innerHTML = `${name.replace(/</g, "&lt;")} <button class="chip-x" title="Remove friend">✕</button>`;
+    const lvl = levels[name];
+    const badge = lvl ? `<span class="mini-badge">${badgeSVG(lvl, 20)}</span>` : "";
+    chip.innerHTML = `${badge}${name.replace(/</g, "&lt;")}` +
+      (lvl ? ` <span class="chip-lvl">Lv ${lvl}</span>` : "") +
+      ` <button class="chip-x" title="Remove friend">✕</button>`;
     chip.querySelector(".chip-x").addEventListener("click", async () => {
       await removeFriendship(name);
       openBoards(); // refresh
@@ -1245,6 +1372,7 @@ async function openBoards() {
   await migrateLocalFriends();
   const friends = await fetchFriends();
   renderFriendChips(friends);
+  fetchLevels(friends).then(levels => renderFriendChips(friends, levels));
   if (!backendReady()) {
     fillBoardRows($("boards-daily-rows"), null, "Global board not configured.");
     fillBoardRows($("friends-rows"), null, "Global board not configured.");
@@ -1434,6 +1562,17 @@ async function loadProfile(name, isMe) {
   $("profile-stats").innerHTML = `<p class="stats-empty">Loading…</p>`;
   profilePins = [];
   drawJourney();
+  // badge for whoever we're viewing
+  const badgeBox = $("profile-badge");
+  if (isMe) {
+    const info = levelInfo(getXP());
+    badgeBox.innerHTML = badgeSVG(info.level, 40) + `<span>Lv ${info.level}</span>`;
+  } else {
+    badgeBox.innerHTML = "";
+    fetchLevels([name]).then(l => {
+      if (l[name]) badgeBox.innerHTML = badgeSVG(l[name], 40) + `<span>Lv ${l[name]}</span>`;
+    });
+  }
   let pins = null;
   if (isMe) {
     pins = (backendReady() && store.getName()) ? await fetchPins(store.getName()) : null;
@@ -1524,8 +1663,12 @@ window.addEventListener("resize", () => {
   clampJourney();
   drawJourney();
 });
+$("btn-home").addEventListener("click", updateHomeBadge);
+$("btn-boards-back").addEventListener("click", updateHomeBadge);
+$("btn-profile-back").addEventListener("click", updateHomeBadge);
 showFriendRequest();
 updateDailyButton();
+updateHomeBadge();
 $("btn-spin").addEventListener("click", spinWheel);
 $("btn-confirm").addEventListener("click", confirmGuess);
 $("btn-next").addEventListener("click", nextRound);
