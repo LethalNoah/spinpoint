@@ -886,18 +886,31 @@ function renderXpPanel(oldInfo, newInfo, gained, doubled) {
   }
 }
 
-function endGame() {
+// Has this name already submitted a daily score today (from any device)?
+async function hasDailyEntry(day, name) {
+  if (!backendReady() || !name) return false;
+  try {
+    const res = await fetch(
+      `${BACKEND.url}/rest/v1/scores?day=eq.${day}&name=eq.${encodeURIComponent(name)}&select=id&limit=1`,
+      { headers: backendHeaders() });
+    if (!res.ok) return false;
+    return (await res.json()).length > 0;
+  } catch (e) { return false; }
+}
+
+async function endGame() {
   $("end-score").textContent = state.score.toLocaleString();
 
-  // XP: flat completion award + score bonus; first daily of the day pays double.
-  // (Computed before the daily block below marks today as played.)
-  const firstDaily = state.mode === "daily" && localStorage.getItem("sp-daily-" + utcDay()) === null;
+  // XP: flat completion award + score bonus; the FIRST daily of the day pays
+  // double — checked against the server so a second device can't double-dip.
+  let firstDaily = state.mode === "daily" && localStorage.getItem("sp-daily-" + utcDay()) === null;
+  if (firstDaily) firstDaily = !(await hasDailyEntry(utcDay(), store.getName()));
+  state.firstDaily = firstDaily;
   const doubled = state.mode === "daily" && firstDaily;
   const gainedXP = (GAME_XP + Math.round(state.score / 10)) * (doubled ? 2 : 1);
-  const oldInfo = levelInfo(getXP());
-  setXP(getXP() + gainedXP);
-  const newInfo = levelInfo(getXP());
-  pushXP();
+  const newTotal = await awardXP(gainedXP);
+  const oldInfo = levelInfo(Math.max(0, newTotal - gainedXP));
+  const newInfo = levelInfo(newTotal);
   renderXpPanel(oldInfo, newInfo, gainedXP, doubled);
 
   // record the run and show where it landed
@@ -916,9 +929,10 @@ function endGame() {
   // daily runs: submit once per device per day, then show the global board
   if (state.mode === "daily") {
     const day = utcDay();
-    const dailyKey = "sp-daily-" + day;
-    if (localStorage.getItem(dailyKey) === null) {
-      localStorage.setItem(dailyKey, state.score);
+    if (localStorage.getItem("sp-daily-" + day) === null) {
+      localStorage.setItem("sp-daily-" + day, state.score);
+    }
+    if (state.firstDaily) {
       submitDailyScore(day, entry.name, state.score)
         .then(() => renderDailyBoard(day, entry.name, state.score));
     } else {
@@ -1000,9 +1014,18 @@ async function fetchDailyTop(day) {
   if (!backendReady()) return null;
   try {
     const res = await fetch(
-      `${BACKEND.url}/rest/v1/scores?day=eq.${day}&select=name,score&order=score.desc&limit=10`,
+      `${BACKEND.url}/rest/v1/scores?day=eq.${day}&select=name,score&order=score.desc&limit=40`,
       { headers: backendHeaders() });
-    return res.ok ? await res.json() : null;
+    if (!res.ok) return null;
+    // one row per name (best score) — guards against multi-device double submits
+    const seen = new Set(), out = [];
+    for (const r of await res.json()) {
+      if (seen.has(r.name)) continue;
+      seen.add(r.name);
+      out.push(r);
+      if (out.length === 10) break;
+    }
+    return out;
   } catch (e) { return null; }
 }
 
@@ -1104,15 +1127,44 @@ function levelInfo(totalXp) {
 const getXP = () => parseInt(localStorage.getItem("sp-xp"), 10) || 0;
 const setXP = v => localStorage.setItem("sp-xp", v);
 
-async function pushXP() {
+// Add XP atomically on the server (multi-device safe) and mirror the total
+// locally. Falls back to local-only when offline or unnamed.
+async function awardXP(gained) {
+  const name = store.getName();
+  if (backendReady() && name) {
+    try {
+      const res = await fetch(`${BACKEND.url}/rest/v1/rpc/add_xp`, {
+        method: "POST",
+        headers: backendHeaders(),
+        body: JSON.stringify({ p_name: name, p_gained: gained }),
+      });
+      if (res.ok) {
+        const total = await res.json();
+        setXP(total);
+        return total;
+      }
+    } catch (e) { /* fall through to local */ }
+  }
+  setXP(getXP() + gained);
+  return getXP();
+}
+
+// Reconcile this device with the server: pull down a bigger server total
+// (played elsewhere), or push up local surplus (played offline).
+async function syncXP() {
   const name = store.getName();
   if (!backendReady() || !name) return;
   try {
-    await fetch(`${BACKEND.url}/rest/v1/players?on_conflict=name`, {
-      method: "POST",
-      headers: { ...backendHeaders(), Prefer: "return=minimal,resolution=merge-duplicates" },
-      body: JSON.stringify({ name, xp: getXP(), updated_at: new Date().toISOString() }),
-    });
+    const res = await fetch(
+      `${BACKEND.url}/rest/v1/players?name=eq.${encodeURIComponent(name)}&select=xp`,
+      { headers: backendHeaders() });
+    if (!res.ok) return;
+    const rows = await res.json();
+    const server = rows[0]?.xp ?? 0;
+    const local = getXP();
+    if (local > server) await awardXP(local - server);
+    else setXP(server);
+    updateHomeBadge();
   } catch (e) { /* offline is fine */ }
 }
 
@@ -1635,6 +1687,8 @@ function shareInvite() {
 const nameInput = $("name-input");
 nameInput.value = store.getName();
 nameInput.addEventListener("input", () => store.setName(nameInput.value.trim()));
+// typing an existing name = signing in on this device: pull that name's XP
+nameInput.addEventListener("change", syncXP);
 nameInput.addEventListener("keydown", e => { if (e.key === "Enter") startGame(); });
 
 // Daily button reflects whether today's run was already submitted
@@ -1669,6 +1723,7 @@ $("btn-profile-back").addEventListener("click", updateHomeBadge);
 showFriendRequest();
 updateDailyButton();
 updateHomeBadge();
+syncXP(); // returning player on a new device? pull their progress down
 $("btn-spin").addEventListener("click", spinWheel);
 $("btn-confirm").addEventListener("click", confirmGuess);
 $("btn-next").addEventListener("click", nextRound);

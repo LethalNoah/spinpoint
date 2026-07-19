@@ -93,7 +93,28 @@ alter table public.players enable row level security;
 create policy "public read players" on public.players for select using (true);
 create policy "public insert players" on public.players for insert with check (true);
 create policy "public update players" on public.players for update using (true) with check (true);
+
+-- atomic XP increment (multi-device safe); per-call gain capped at 5000
+create or replace function public.add_xp(p_name text, p_gained int)
+returns int language sql security definer set search_path = public as $func$
+  insert into public.players (name, xp, updated_at)
+  values (p_name, greatest(0, least(p_gained, 5000)), now())
+  on conflict (name) do update
+    set xp = players.xp + greatest(0, least(p_gained, 5000)), updated_at = now()
+  returning xp;
+$func$;
+grant execute on function public.add_xp(text, int) to anon;
 ```
+
+## Accounts / multi-device
+
+There are no passwords: the explorer name IS the account. Scores, pins,
+friendships, and XP are all keyed by name server-side, so typing the same name
+on any device continues that progress (XP syncs both directions on load and on
+name change; daily submissions and double-XP are checked server-side so two
+devices can't double-dip). Known tradeoff: anyone who types your name plays as
+you — fine for a friendly deployment; add an optional PIN column if that ever
+becomes a problem.
 
 (Friendship rows are stored with `a` < `b` alphabetically; the unique constraint
 prevents duplicates. Deletes are public so anyone can unfriend — acceptable for a
