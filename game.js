@@ -1040,6 +1040,71 @@ function getFriends() {
   catch (e) { return []; }
 }
 function setFriends(f) { localStorage.setItem("sp-friends", JSON.stringify(f)); }
+function addFriendName(name) {
+  const friends = getFriends();
+  if (!friends.includes(name)) {
+    friends.push(name);
+    setFriends(friends);
+  }
+}
+
+// Invite links: ?f=<name> — one click and the opener adds you, no typing
+function inviteUrl() {
+  return `${location.origin}${location.pathname}?f=${encodeURIComponent(store.getName())}`;
+}
+
+async function copyLink(url, btn, okText, failPromptLabel, restoreText) {
+  try {
+    await navigator.clipboard.writeText(url);
+    btn.textContent = okText;
+    setTimeout(() => { btn.textContent = restoreText; }, 2500);
+  } catch (e) {
+    window.prompt(failPromptLabel, url);
+  }
+}
+
+const friendInvite = (() => {
+  const p = new URLSearchParams(location.search);
+  const n = p.get("f");
+  if (!n) return null;
+  // strip only the f param; challenge params (c/n/s) stay untouched
+  p.delete("f");
+  const qs = p.toString();
+  history.replaceState(null, "", location.pathname + (qs ? "?" + qs : ""));
+  return n.trim().slice(0, 16) || null;
+})();
+
+function showFriendRequest() {
+  if (!friendInvite) return;
+  const box = $("friend-request");
+  const safe = friendInvite.replace(/</g, "&lt;");
+  box.classList.remove("hidden");
+  if (friendInvite === store.getName()) {
+    box.innerHTML = `🫂 That's your own invite link — send it to someone else!`;
+    return;
+  }
+  if (getFriends().includes(friendInvite)) {
+    box.innerHTML = `🫂 <b>${safe}</b> is already your friend!`;
+    return;
+  }
+  box.innerHTML = `🫂 <b>${safe}</b> wants to be friends! ` +
+    `<div class="banner-actions">` +
+    `<button id="btn-friend-yes" class="btn-big btn-small">Add ${safe}</button>` +
+    `<button id="btn-friend-no" class="btn-big btn-daily btn-small">No thanks</button></div>`;
+  $("btn-friend-yes").addEventListener("click", () => {
+    addFriendName(friendInvite);
+    if (store.getName()) {
+      box.innerHTML = `✔ <b>${safe}</b> added! Friendship is one-way until they add you too — ` +
+        `<div class="banner-actions"><button id="btn-friend-back" class="btn-big btn-small">🔗 Copy your link for them</button></div>`;
+      $("btn-friend-back").addEventListener("click", e =>
+        copyLink(inviteUrl(), e.target, "✔ Copied — send it back!", "Copy your invite link:", "🔗 Copy your link for them"));
+    } else {
+      box.innerHTML = `✔ <b>${safe}</b> added! Set your explorer name below, then use ` +
+        `"Copy invite link" in Leaderboards &amp; Friends so they can add you back.`;
+    }
+  });
+  $("btn-friend-no").addEventListener("click", () => box.classList.add("hidden"));
+}
 
 async function fetchFriendsToday(day, names) {
   if (!backendReady() || names.length === 0) return null;
@@ -1113,11 +1178,7 @@ function addFriend() {
   const input = $("friend-input");
   const name = input.value.trim().slice(0, 16);
   if (!name) return;
-  const friends = getFriends();
-  if (!friends.includes(name)) {
-    friends.push(name);
-    setFriends(friends);
-  }
+  addFriendName(name);
   input.value = "";
   openBoards();
 }
@@ -1128,19 +1189,20 @@ function challengeUrl() {
   return `${location.origin}${location.pathname}?c=${state.seed.toString(36)}&n=${name}&s=${state.score}`;
 }
 
-async function shareChallenge() {
-  const url = challengeUrl();
-  const btn = $("btn-share");
-  try {
-    await navigator.clipboard.writeText(url);
-    btn.textContent = "✔ Link copied — send it!";
-  } catch (e) {
-    // clipboard blocked (e.g. file://) — show the link for manual copy
-    window.prompt("Copy your challenge link:", url);
-    btn.textContent = "⚔️ Challenge a friend";
+function shareChallenge() {
+  copyLink(challengeUrl(), $("btn-share"),
+    "✔ Link copied — send it!", "Copy your challenge link:", "⚔️ Challenge a friend");
+}
+
+function shareInvite() {
+  const btn = $("btn-invite");
+  if (!store.getName()) {
+    btn.textContent = "Set your explorer name on the home screen first!";
+    setTimeout(() => { btn.textContent = "🔗 Copy invite link"; }, 2500);
     return;
   }
-  setTimeout(() => { btn.textContent = "⚔️ Challenge a friend"; }, 2500);
+  copyLink(inviteUrl(), btn,
+    "✔ Copied — friends click it to add you!", "Copy your invite link:", "🔗 Copy invite link");
 }
 
 // ---------- Wire up ----------
@@ -1166,6 +1228,8 @@ $("btn-boards-back").addEventListener("click", () => { updateDailyButton(); show
 $("btn-home").addEventListener("click", () => { updateDailyButton(); show("screen-start"); });
 $("btn-add-friend").addEventListener("click", addFriend);
 $("friend-input").addEventListener("keydown", e => { if (e.key === "Enter") addFriend(); });
+$("btn-invite").addEventListener("click", shareInvite);
+showFriendRequest();
 updateDailyButton();
 $("btn-spin").addEventListener("click", spinWheel);
 $("btn-confirm").addEventListener("click", confirmGuess);

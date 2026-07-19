@@ -102,6 +102,17 @@ body {
   animation: splash-in .9s cubic-bezier(.2,1.6,.4,1) both;
 }
 .challenge-banner b { color: var(--accent); }
+.friend-banner {
+  background: rgba(67,182,73,.12);
+  border: 2px solid var(--good);
+  border-radius: 0.75rem;
+  padding: 0.8rem 1.2rem;
+  font-size: 1.05rem;
+  margin-bottom: 1.4rem;
+  animation: splash-in .9s cubic-bezier(.2,1.6,.4,1) both;
+}
+.friend-banner b { color: var(--accent); }
+.banner-actions { display: flex; gap: 0.6rem; justify-content: center; margin-top: 0.8rem; flex-wrap: wrap; }
 .name-row { margin-bottom: 1.4rem; }
 .start-buttons { display: flex; flex-direction: column; gap: 0.8rem; align-items: center; }
 .btn-daily {
