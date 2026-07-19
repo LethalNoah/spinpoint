@@ -1640,9 +1640,22 @@ async function loadProfile(name, isMe) {
   renderStats(profilePins);
 }
 
+// Map and stats are alternate views — one at a time keeps the screen clean
+function setProfileView(v) {
+  $("tab-map").classList.toggle("active", v === "map");
+  $("tab-stats").classList.toggle("active", v === "stats");
+  $("journey-wrap").classList.toggle("hidden", v !== "map");
+  $("profile-scroll").classList.toggle("hidden", v !== "stats");
+  if (v === "map") {
+    sizeJourney();
+    clampJourney();
+    drawJourney();
+  }
+}
+
 async function openProfile() {
   show("screen-profile");
-  sizeJourney();
+  setProfileView("map");
   resetJourneyView();
   drawJourney();
   const friends = await fetchFriends();
@@ -1711,8 +1724,11 @@ $("friend-input").addEventListener("keydown", e => { if (e.key === "Enter") addF
 $("btn-invite").addEventListener("click", shareInvite);
 $("btn-profile").addEventListener("click", openProfile);
 $("btn-profile-back").addEventListener("click", () => { updateDailyButton(); show("screen-start"); });
+$("tab-map").addEventListener("click", () => setProfileView("map"));
+$("tab-stats").addEventListener("click", () => setProfileView("stats"));
 window.addEventListener("resize", () => {
   if ($("screen-profile").classList.contains("hidden")) return;
+  if ($("journey-wrap").classList.contains("hidden")) return;
   sizeJourney();
   clampJourney();
   drawJourney();

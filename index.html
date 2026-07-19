@@ -112,11 +112,14 @@
 <!-- PROFILE: JOURNEY MAP + STATS -->
 <section id="screen-profile" class="screen hidden">
   <div class="profile-head">
-    <h2>🗺️ Map &amp; Stats</h2>
     <div id="profile-badge" class="profile-badge"></div>
+    <div class="view-tabs">
+      <button id="tab-map" class="view-tab active">🗺️ Map</button>
+      <button id="tab-stats" class="view-tab">📊 Stats</button>
+    </div>
     <div id="profile-chips" class="profile-chips"></div>
   </div>
-  <div class="journey-wrap">
+  <div id="journey-wrap" class="journey-wrap">
     <canvas id="journey"></canvas>
     <div class="journey-legend">
       <span><i class="dot dot-green"></i> actual city</span>
@@ -124,8 +127,10 @@
       <span>scroll to zoom · drag to pan</span>
     </div>
   </div>
-  <div class="profile-scroll">
+  <div id="profile-scroll" class="profile-scroll hidden">
     <div id="profile-stats"></div>
+  </div>
+  <div class="profile-foot">
     <button id="btn-profile-back" class="btn-big">Back</button>
   </div>
 </section>
