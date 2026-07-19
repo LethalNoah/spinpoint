@@ -28,6 +28,7 @@ const state = {
   score: 0,
   streak: 0,
   mode: "free",         // "free" | "daily" (challenge links are seeded free runs)
+  gameId: "",
   seed: 0,
   rng: Math.random,     // seeded PRNG for the run; same seed -> same genres & questions
   genre: null,
@@ -76,10 +77,11 @@ let activeChallenge = (() => {
 
 // ---------- Helpers ----------
 const $ = id => document.getElementById(id);
-const screens = ["screen-start", "screen-wheel", "screen-question", "screen-map", "screen-end", "screen-boards"];
+const screens = ["screen-start", "screen-wheel", "screen-question", "screen-map", "screen-end", "screen-boards", "screen-profile"];
 function show(id) {
   screens.forEach(s => $(s).classList.toggle("hidden", s !== id));
-  $("hud").classList.toggle("hidden", id === "screen-start" || id === "screen-boards");
+  const noHud = ["screen-start", "screen-boards", "screen-profile"].includes(id);
+  $("hud").classList.toggle("hidden", noHud);
 }
 function shuffle(arr) {
   const a = arr.slice();
@@ -772,6 +774,12 @@ function confirmGuess() {
     genre: state.genre, city: q.city, correct: state.answeredCorrect,
     km: Math.round(km), points,
   });
+  recordPin({
+    game_id: state.gameId, genre: state.genre.name, city: q.city,
+    alat: q.lat, alon: q.lon,
+    glat: +state.guess.lat.toFixed(3), glon: +state.guess.lon.toFixed(3),
+    km: Math.round(km), correct: state.answeredCorrect, points,
+  });
 
   $("res-dist").textContent = `${Math.round(km).toLocaleString()} km`;
   $("res-mult").textContent = `+${geoBonus} / ${geoMax(q.d)}`;
@@ -1027,6 +1035,7 @@ function startGame(mode) {
     : activeChallenge ? activeChallenge.seed
     : (Math.random() * 2 ** 31) | 0;
   state.rng = mulberry32(state.seed);
+  state.gameId = Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36);
   displayedScore = 0;
   $("hud-score").textContent = "0";
   updateStreakHud();
@@ -1034,18 +1043,99 @@ function startGame(mode) {
   nextRound();
 }
 
-// ---------- Friends (local list of explorer names; matched against the global board) ----------
-function getFriends() {
+// ---------- Pins: every guessed round, kept locally and (when possible) globally ----------
+function getLocalPins() {
+  try { return JSON.parse(localStorage.getItem("sp-pins")) || []; }
+  catch (e) { return []; }
+}
+function recordPin(pin) {
+  const pins = getLocalPins();
+  pins.push(pin);
+  localStorage.setItem("sp-pins", JSON.stringify(pins.slice(-1000)));
+  const name = store.getName();
+  if (backendReady() && name) {
+    fetch(`${BACKEND.url}/rest/v1/pins`, {
+      method: "POST",
+      headers: { ...backendHeaders(), Prefer: "return=minimal" },
+      body: JSON.stringify({ ...pin, name }),
+    }).catch(() => {});
+  }
+}
+async function fetchPins(name) {
+  if (!backendReady()) return null;
+  try {
+    const res = await fetch(
+      `${BACKEND.url}/rest/v1/pins?name=eq.${encodeURIComponent(name)}&select=game_id,genre,city,alat,alon,glat,glon,km,correct,points&order=created_at.desc&limit=1000`,
+      { headers: backendHeaders() });
+    return res.ok ? await res.json() : null;
+  } catch (e) { return null; }
+}
+
+// ---------- Friends ----------
+// With a backend: friendships are mutual server-side pairs — one accepted invite
+// links both people. Without one: a local list of names, as before.
+const cleanName = n => n.replace(/["(),]/g, "").trim().slice(0, 16);
+const quoted = n => `"${cleanName(n)}"`;
+
+function getLocalFriends() {
   try { return JSON.parse(localStorage.getItem("sp-friends")) || []; }
   catch (e) { return []; }
 }
-function setFriends(f) { localStorage.setItem("sp-friends", JSON.stringify(f)); }
-function addFriendName(name) {
-  const friends = getFriends();
-  if (!friends.includes(name)) {
-    friends.push(name);
-    setFriends(friends);
+function setLocalFriends(f) { localStorage.setItem("sp-friends", JSON.stringify(f)); }
+
+async function fetchFriends() {
+  const me = store.getName();
+  if (!backendReady() || !me) return getLocalFriends();
+  try {
+    const q = encodeURIComponent(`(a.eq.${quoted(me)},b.eq.${quoted(me)})`);
+    const res = await fetch(`${BACKEND.url}/rest/v1/friendships?or=${q}&select=a,b`,
+      { headers: backendHeaders() });
+    if (!res.ok) return getLocalFriends();
+    const rows = await res.json();
+    return [...new Set(rows.map(r => r.a === me ? r.b : r.a))];
+  } catch (e) { return getLocalFriends(); }
+}
+
+async function addFriendship(other) {
+  const me = store.getName();
+  other = cleanName(other);
+  if (!other || other === me) return false;
+  if (!backendReady() || !me) {
+    const f = getLocalFriends();
+    if (!f.includes(other)) { f.push(other); setLocalFriends(f); }
+    return true;
   }
+  const [a, b] = me < other ? [me, other] : [other, me];
+  try {
+    const res = await fetch(`${BACKEND.url}/rest/v1/friendships?on_conflict=a,b`, {
+      method: "POST",
+      headers: { ...backendHeaders(), Prefer: "return=minimal,resolution=ignore-duplicates" },
+      body: JSON.stringify({ a, b }),
+    });
+    return res.ok;
+  } catch (e) { return false; }
+}
+
+async function removeFriendship(other) {
+  const me = store.getName();
+  other = cleanName(other);
+  if (!backendReady() || !me) {
+    setLocalFriends(getLocalFriends().filter(n => n !== other));
+    return;
+  }
+  const [a, b] = me < other ? [me, other] : [other, me];
+  try {
+    await fetch(`${BACKEND.url}/rest/v1/friendships?a=eq.${encodeURIComponent(a)}&b=eq.${encodeURIComponent(b)}`,
+      { method: "DELETE", headers: backendHeaders() });
+  } catch (e) { /* ignore */ }
+}
+
+// One-time migration: old local one-way follows become mutual server friendships
+async function migrateLocalFriends() {
+  const local = getLocalFriends();
+  if (!backendReady() || !store.getName() || local.length === 0) return;
+  for (const n of local) await addFriendship(n);
+  localStorage.removeItem("sp-friends");
 }
 
 // Invite links: ?f=<name> — one click and the opener adds you, no typing
@@ -1083,25 +1173,24 @@ function showFriendRequest() {
     box.innerHTML = `🫂 That's your own invite link — send it to someone else!`;
     return;
   }
-  if (getFriends().includes(friendInvite)) {
-    box.innerHTML = `🫂 <b>${safe}</b> is already your friend!`;
-    return;
-  }
+  const hint = `<div id="friend-name-hint" class="banner-hint hidden">Pick your explorer name below first, then hit Add!</div>`;
   box.innerHTML = `🫂 <b>${safe}</b> wants to be friends! ` +
     `<div class="banner-actions">` +
     `<button id="btn-friend-yes" class="btn-big btn-small">Add ${safe}</button>` +
-    `<button id="btn-friend-no" class="btn-big btn-daily btn-small">No thanks</button></div>`;
-  $("btn-friend-yes").addEventListener("click", () => {
-    addFriendName(friendInvite);
-    if (store.getName()) {
-      box.innerHTML = `✔ <b>${safe}</b> added! Friendship is one-way until they add you too — ` +
-        `<div class="banner-actions"><button id="btn-friend-back" class="btn-big btn-small">🔗 Copy your link for them</button></div>`;
-      $("btn-friend-back").addEventListener("click", e =>
-        copyLink(inviteUrl(), e.target, "✔ Copied — send it back!", "Copy your invite link:", "🔗 Copy your link for them"));
-    } else {
-      box.innerHTML = `✔ <b>${safe}</b> added! Set your explorer name below, then use ` +
-        `"Copy invite link" in Leaderboards &amp; Friends so they can add you back.`;
+    `<button id="btn-friend-no" class="btn-big btn-daily btn-small">No thanks</button></div>` + hint;
+  $("btn-friend-yes").addEventListener("click", async () => {
+    if (backendReady() && !store.getName()) {
+      // a mutual friendship needs a name on both ends
+      $("friend-name-hint").classList.remove("hidden");
+      $("name-input").focus();
+      return;
     }
+    const ok = await addFriendship(friendInvite);
+    box.innerHTML = ok && backendReady()
+      ? `✔ You and <b>${safe}</b> are now friends — both sides, no link back needed!`
+      : ok
+        ? `✔ <b>${safe}</b> added to your local list!`
+        : `Couldn't reach the server — try again in a moment.`;
   });
   $("btn-friend-no").addEventListener("click", () => box.classList.add("hidden"));
 }
@@ -1132,15 +1221,15 @@ function fillBoardRows(tbody, rows, emptyMsg) {
   });
 }
 
-function renderFriendChips() {
+function renderFriendChips(friends) {
   const box = $("friend-list");
   box.innerHTML = "";
-  getFriends().forEach(name => {
+  friends.forEach(name => {
     const chip = document.createElement("span");
     chip.className = "friend-chip";
-    chip.innerHTML = `${name.replace(/</g, "&lt;")} <button class="chip-x" title="Remove">✕</button>`;
-    chip.querySelector(".chip-x").addEventListener("click", () => {
-      setFriends(getFriends().filter(n => n !== name));
+    chip.innerHTML = `${name.replace(/</g, "&lt;")} <button class="chip-x" title="Remove friend">✕</button>`;
+    chip.querySelector(".chip-x").addEventListener("click", async () => {
+      await removeFriendship(name);
       openBoards(); // refresh
     });
     box.appendChild(chip);
@@ -1151,10 +1240,11 @@ async function openBoards() {
   show("screen-boards");
   const day = utcDay();
   $("boards-daily-title").textContent = `🌍 Daily Top 10 · ${day}`;
-  renderFriendChips();
   fillBoardRows($("boards-local-rows"), store.getScores(),
     "No games on this device yet.");
-  const friends = getFriends();
+  await migrateLocalFriends();
+  const friends = await fetchFriends();
+  renderFriendChips(friends);
   if (!backendReady()) {
     fillBoardRows($("boards-daily-rows"), null, "Global board not configured.");
     fillBoardRows($("friends-rows"), null, "Global board not configured.");
@@ -1170,17 +1260,214 @@ async function openBoards() {
   fillBoardRows($("boards-daily-rows"), top,
     top === null ? "Couldn't reach the leaderboard." : "Nobody has played today's daily yet — go be first!");
   fillBoardRows($("friends-rows"), friendRows,
-    friends.length === 0 ? "Add friends by their explorer name to see their daily scores."
+    friends.length === 0 ? "Add friends by their explorer name (or send an invite link) to see their daily scores."
       : "None of your friends have played today's daily yet.");
 }
 
-function addFriend() {
+async function addFriend() {
   const input = $("friend-input");
-  const name = input.value.trim().slice(0, 16);
+  const name = cleanName(input.value);
   if (!name) return;
-  addFriendName(name);
+  if (backendReady() && !store.getName()) {
+    input.value = "";
+    input.placeholder = "Set your explorer name first!";
+    return;
+  }
+  await addFriendship(name);
   input.value = "";
   openBoards();
+}
+
+// ---------- Profile: journey map + stats, for me or a friend ----------
+const jCanvas = $("journey");
+const jctx = jCanvas.getContext("2d");
+let jview = { zoom: 1, ox: 0, oy: 0 };
+let jcw = 0, jch = 0;
+let jDrag = null;
+let profilePins = [];
+
+function jScale() { return jview.zoom * Math.min(jcw / PROJ_W, jch / PROJ_H); }
+function jToScreen(lat, lon) { return [projX(lon) * jScale() + jview.ox, projY(lat) * jScale() + jview.oy]; }
+
+function sizeJourney() {
+  const wrap = jCanvas.parentElement;
+  const d = window.devicePixelRatio || 1;
+  jcw = wrap.clientWidth; jch = wrap.clientHeight;
+  jCanvas.width = jcw * d;
+  jCanvas.height = jch * d;
+}
+function resetJourneyView() {
+  jview.zoom = 1;
+  const s = jScale();
+  jview.ox = (jcw - PROJ_W * s) / 2;
+  jview.oy = (jch - PROJ_H * s) / 2;
+}
+function clampJourney() {
+  const w = PROJ_W * jScale(), h = PROJ_H * jScale();
+  jview.ox = w <= jcw ? (jcw - w) / 2 : Math.min(0, Math.max(jcw - w, jview.ox));
+  jview.oy = h <= jch ? (jch - h) / 2 : Math.min(0, Math.max(jch - h, jview.oy));
+}
+
+function drawJourney() {
+  const d = window.devicePixelRatio || 1;
+  jctx.setTransform(d, 0, 0, d, 0, 0);
+  jctx.fillStyle = "#04070d";
+  jctx.fillRect(0, 0, jcw, jch);
+  jctx.save();
+  jctx.transform(jScale(), 0, 0, jScale(), jview.ox, jview.oy);
+  if (satReady) {
+    const needPx = jScale() * d * PROJ_W;
+    const mip = satMips.find(m => m.width >= needPx) || satMips[satMips.length - 1];
+    jctx.drawImage(mip, 0, 0, mip.width, mip.height, 0, 0, PROJ_W, PROJ_H);
+    jctx.fillStyle = "rgba(4,7,13,.35)"; // dim so pins pop
+    jctx.fillRect(0, 0, PROJ_W, PROJ_H);
+  } else {
+    jctx.fillStyle = getComputedStyle(document.body).getPropertyValue("--land");
+    jctx.fill(landPath);
+  }
+  jctx.restore();
+
+  const k = uiK();
+  for (const p of profilePins) {
+    const [gx, gy] = jToScreen(p.glat, p.glon);
+    const [ax, ay] = jToScreen(p.alat, p.alon);
+    jctx.setLineDash([4, 4]);
+    jctx.beginPath();
+    jctx.moveTo(gx, gy);
+    jctx.lineTo(ax, ay);
+    jctx.strokeStyle = p.correct ? "rgba(255,210,61,.5)" : "rgba(229,83,61,.45)";
+    jctx.lineWidth = 1.2 * k;
+    jctx.stroke();
+    jctx.setLineDash([]);
+    jctx.beginPath();
+    jctx.arc(gx, gy, 2.6 * k, 0, 2 * Math.PI);
+    jctx.fillStyle = "#e5533d";
+    jctx.fill();
+    jctx.beginPath();
+    jctx.arc(ax, ay, 3.4 * k, 0, 2 * Math.PI);
+    jctx.fillStyle = "#43b649";
+    jctx.fill();
+    jctx.strokeStyle = "rgba(0,0,0,.5)";
+    jctx.lineWidth = 1;
+    jctx.stroke();
+  }
+}
+
+jCanvas.addEventListener("pointerdown", e => {
+  jDrag = { x: e.clientX, y: e.clientY, ox: jview.ox, oy: jview.oy };
+  jCanvas.setPointerCapture(e.pointerId);
+});
+jCanvas.addEventListener("pointermove", e => {
+  if (!jDrag) return;
+  jview.ox = jDrag.ox + e.clientX - jDrag.x;
+  jview.oy = jDrag.oy + e.clientY - jDrag.y;
+  clampJourney();
+  drawJourney();
+});
+jCanvas.addEventListener("pointerup", () => { jDrag = null; });
+jCanvas.addEventListener("wheel", e => {
+  e.preventDefault();
+  const rect = jCanvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  const factor = e.deltaY < 0 ? 1.25 : 0.8;
+  const newZoom = Math.min(14, Math.max(1, jview.zoom * factor));
+  const f = newZoom / jview.zoom;
+  jview.ox = mx - (mx - jview.ox) * f;
+  jview.oy = my - (my - jview.oy) * f;
+  jview.zoom = newZoom;
+  clampJourney();
+  drawJourney();
+}, { passive: false });
+
+function computeStats(pins) {
+  const games = new Set(pins.map(p => p.game_id)).size;
+  const rounds = pins.length;
+  const correct = pins.filter(p => p.correct).length;
+  const totalPts = pins.reduce((s, p) => s + (p.points || 0), 0);
+  const avgKm = rounds ? Math.round(pins.reduce((s, p) => s + p.km, 0) / rounds) : 0;
+  const byGenre = {};
+  for (const p of pins) {
+    const g = byGenre[p.genre] = byGenre[p.genre] || { rounds: 0, correct: 0, km: 0, pts: 0 };
+    g.rounds++; g.correct += p.correct ? 1 : 0; g.km += p.km; g.pts += p.points || 0;
+  }
+  const rows = Object.entries(byGenre).map(([genre, g]) => ({
+    genre, rounds: g.rounds,
+    pct: Math.round(g.correct / g.rounds * 100),
+    avgKm: Math.round(g.km / g.rounds),
+    pts: g.pts,
+  })).sort((x, y) => y.pct - x.pct || y.pts - x.pts);
+  return { games, rounds, correct, totalPts, avgKm, rows };
+}
+
+function renderStats(pins) {
+  const box = $("profile-stats");
+  if (pins.length === 0) {
+    box.innerHTML = `<p class="stats-empty">No pins yet — play some rounds and the map fills in!</p>`;
+    return;
+  }
+  const s = computeStats(pins);
+  const best = s.rows[0], worst = s.rows[s.rows.length - 1];
+  const icon = g => (GENRES.find(x => x.name === g) || {}).icon || "";
+  let html = `<div class="stat-tiles">` +
+    `<div class="stat-tile"><b>${s.games}</b><span>games</span></div>` +
+    `<div class="stat-tile"><b>${s.rounds}</b><span>rounds</span></div>` +
+    `<div class="stat-tile"><b>${Math.round(s.correct / s.rounds * 100)}%</b><span>trivia correct</span></div>` +
+    `<div class="stat-tile"><b>${s.avgKm.toLocaleString()}</b><span>avg km off</span></div>` +
+    `<div class="stat-tile"><b>${s.totalPts.toLocaleString()}</b><span>total points</span></div>` +
+    `</div>`;
+  if (s.rows.length > 1) {
+    html += `<p class="stat-verdict">Best category: <b>${icon(best.genre)} ${best.genre}</b> (${best.pct}%) · ` +
+      `Needs work: <b>${icon(worst.genre)} ${worst.genre}</b> (${worst.pct}%)</p>`;
+  }
+  html += `<table class="end-table"><thead><tr><th>Genre</th><th>Rounds</th><th>Correct</th><th>Avg dist</th><th>Pts</th></tr></thead><tbody>`;
+  for (const r of s.rows) {
+    html += `<tr><td>${icon(r.genre)} ${r.genre}</td><td>${r.rounds}</td><td>${r.pct}%</td>` +
+      `<td>${r.avgKm.toLocaleString()} km</td><td class="pts">${r.pts.toLocaleString()}</td></tr>`;
+  }
+  html += `</tbody></table>`;
+  box.innerHTML = html;
+}
+
+async function loadProfile(name, isMe) {
+  const chips = [...document.querySelectorAll("#profile-chips .p-chip")];
+  chips.forEach(c => c.classList.toggle("active", c.dataset.name === (isMe ? "" : name)));
+  $("profile-stats").innerHTML = `<p class="stats-empty">Loading…</p>`;
+  profilePins = [];
+  drawJourney();
+  let pins = null;
+  if (isMe) {
+    pins = (backendReady() && store.getName()) ? await fetchPins(store.getName()) : null;
+    if (!pins || pins.length === 0) {
+      const local = getLocalPins();
+      if (local.length > (pins || []).length) pins = local;
+    }
+  } else {
+    pins = await fetchPins(name);
+  }
+  profilePins = pins || [];
+  drawJourney();
+  renderStats(profilePins);
+}
+
+async function openProfile() {
+  show("screen-profile");
+  sizeJourney();
+  resetJourneyView();
+  drawJourney();
+  const friends = await fetchFriends();
+  const box = $("profile-chips");
+  box.innerHTML = "";
+  const mkChip = (label, name, isMe) => {
+    const b = document.createElement("button");
+    b.className = "p-chip";
+    b.dataset.name = isMe ? "" : name;
+    b.textContent = label;
+    b.addEventListener("click", () => loadProfile(name, isMe));
+    box.appendChild(b);
+  };
+  mkChip("Me", store.getName(), true);
+  friends.forEach(f => mkChip(f, f, false));
+  loadProfile(store.getName(), true);
 }
 
 // ---------- Challenge sharing ----------
@@ -1229,6 +1516,14 @@ $("btn-home").addEventListener("click", () => { updateDailyButton(); show("scree
 $("btn-add-friend").addEventListener("click", addFriend);
 $("friend-input").addEventListener("keydown", e => { if (e.key === "Enter") addFriend(); });
 $("btn-invite").addEventListener("click", shareInvite);
+$("btn-profile").addEventListener("click", openProfile);
+$("btn-profile-back").addEventListener("click", () => { updateDailyButton(); show("screen-start"); });
+window.addEventListener("resize", () => {
+  if ($("screen-profile").classList.contains("hidden")) return;
+  sizeJourney();
+  clampJourney();
+  drawJourney();
+});
 showFriendRequest();
 updateDailyButton();
 $("btn-spin").addEventListener("click", spinWheel);

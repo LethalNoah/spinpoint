@@ -36,6 +36,7 @@
       <button id="btn-start" class="btn-big">Play</button>
       <button id="btn-daily" class="btn-big btn-daily">🌍 Daily Challenge</button>
       <button id="btn-boards" class="btn-big btn-daily">🏆 Leaderboards &amp; Friends</button>
+      <button id="btn-profile" class="btn-big btn-daily">🗺️ My Map &amp; Stats</button>
     </div>
   </div>
 </section>
@@ -103,6 +104,26 @@
     <h3>📱 This device</h3>
     <table class="lb-table"><tbody id="boards-local-rows"></tbody></table>
     <button id="btn-boards-back" class="btn-big">Back</button>
+  </div>
+</section>
+
+<!-- PROFILE: JOURNEY MAP + STATS -->
+<section id="screen-profile" class="screen hidden">
+  <div class="profile-head">
+    <h2>🗺️ Map &amp; Stats</h2>
+    <div id="profile-chips" class="profile-chips"></div>
+  </div>
+  <div class="journey-wrap">
+    <canvas id="journey"></canvas>
+    <div class="journey-legend">
+      <span><i class="dot dot-green"></i> actual city</span>
+      <span><i class="dot dot-red"></i> your pin</span>
+      <span>scroll to zoom · drag to pan</span>
+    </div>
+  </div>
+  <div class="profile-scroll">
+    <div id="profile-stats"></div>
+    <button id="btn-profile-back" class="btn-big">Back</button>
   </div>
 </section>
 

@@ -45,6 +45,46 @@ create policy "public insert" on public.scores for insert with check (true);
 create index scores_day_score on public.scores (day, score desc);
 ```
 
+For mutual friendships and the journey-map/stats features, also run:
+
+```sql
+create table public.friendships (
+  id bigint generated always as identity primary key,
+  a text not null check (char_length(a) between 1 and 16),
+  b text not null check (char_length(b) between 1 and 16),
+  created_at timestamptz not null default now(),
+  unique (a, b)
+);
+alter table public.friendships enable row level security;
+create policy "public read friendships" on public.friendships for select using (true);
+create policy "public insert friendships" on public.friendships for insert with check (true);
+create policy "public delete friendships" on public.friendships for delete using (true);
+
+create table public.pins (
+  id bigint generated always as identity primary key,
+  name text not null check (char_length(name) between 1 and 16),
+  game_id text not null,
+  genre text not null,
+  city text not null,
+  alat double precision not null,
+  alon double precision not null,
+  glat double precision not null,
+  glon double precision not null,
+  km int not null check (km between 0 and 21000),
+  correct boolean not null,
+  points int not null check (points between 0 and 1000),
+  created_at timestamptz not null default now()
+);
+alter table public.pins enable row level security;
+create policy "public read pins" on public.pins for select using (true);
+create policy "public insert pins" on public.pins for insert with check (true);
+create index pins_name_time on public.pins (name, created_at desc);
+```
+
+(Friendship rows are stored with `a` < `b` alphabetically; the unique constraint
+prevents duplicates. Deletes are public so anyone can unfriend — acceptable for a
+small friendly deployment, worth revisiting if the game grows.)
+
 3. In **Settings → API**, copy the **Project URL** and the **anon public** key
    into `config.js`:
 
