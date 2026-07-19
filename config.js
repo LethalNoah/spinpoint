@@ -6,6 +6,6 @@
 //   2. Run the SQL in SETUP.md in the project's SQL editor
 //   3. Paste your project URL and "anon public" key below and redeploy
 const BACKEND = {
-  url: "",      // e.g. "https://abcdefgh.supabase.co"
-  anonKey: "",  // Settings -> API -> anon public key
+  url: "https://mbdmakxiucltxegxguqq.supabase.co",
+  anonKey: "sb_publishable_uEzhYpeoql0JqSvtJSnmjA_acGZBMMH", // publishable — safe to share
 };

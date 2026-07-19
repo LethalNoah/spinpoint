@@ -918,11 +918,13 @@ function endGame() {
 
 // ---------- Global daily leaderboard (Supabase REST; no-ops until config.js is filled) ----------
 const backendReady = () => typeof BACKEND !== "undefined" && BACKEND.url && BACKEND.anonKey;
-const backendHeaders = () => ({
-  apikey: BACKEND.anonKey,
-  Authorization: `Bearer ${BACKEND.anonKey}`,
-  "Content-Type": "application/json",
-});
+const backendHeaders = () => {
+  const h = { apikey: BACKEND.anonKey, "Content-Type": "application/json" };
+  // legacy anon keys are JWTs and also go in the Authorization header;
+  // new publishable keys (sb_publishable_...) must NOT — apikey alone is correct
+  if (BACKEND.anonKey.startsWith("eyJ")) h.Authorization = `Bearer ${BACKEND.anonKey}`;
+  return h;
+};
 
 async function submitDailyScore(day, name, score) {
   if (!backendReady()) return false;
